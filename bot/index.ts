@@ -1,9 +1,3 @@
-import * as dotenv from 'dotenv'
-import * as path from 'path'
-// Load .env.local dulu sebelum apapun
-dotenv.config({ path: path.resolve(process.cwd(), '.env.local') })
-dotenv.config({ path: path.resolve(process.cwd(), '.env') })
-
 import { Telegraf } from 'telegraf'
 import { message } from 'telegraf/filters'
 import { handleStok, handleStokBahan } from './handlers/stock'

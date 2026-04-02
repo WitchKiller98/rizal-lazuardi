@@ -15,6 +15,7 @@ dist/
 # Environment variables
 .env
 .env.local
+# Tapi .env.example boleh di-commit
 .env.development.local
 .env.test.local
 .env.production.local
