@@ -71,8 +71,8 @@ export default function SettingsPage() {
               <Bot className="w-4 h-4 text-gray-500" />
               <span className="text-sm font-medium">Telegram Bot</span>
             </div>
-            <Badge variant={process.env.TELEGRAM_BOT_TOKEN ? 'success' : 'secondary'}>
-              {process.env.TELEGRAM_BOT_TOKEN ? 'Aktif' : 'Belum Dikonfigurasi'}
+            <Badge variant={process.env.NEXT_PUBLIC_TELEGRAM_BOT_CONFIGURED === 'true' ? 'default' : 'secondary'}>
+              {process.env.NEXT_PUBLIC_TELEGRAM_BOT_CONFIGURED === 'true' ? 'Aktif' : 'Belum Dikonfigurasi'}
             </Badge>
           </div>
         </CardContent>
