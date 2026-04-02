@@ -27,10 +27,22 @@ function formatRupiah(amount: number): string {
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount)
 }
 
+function getProductName(products: unknown): string {
+  if (!products) return 'Unknown'
+  if (Array.isArray(products)) return (products[0] as { name: string })?.name || 'Unknown'
+  return (products as { name: string })?.name || 'Unknown'
+}
+
+function getProductUnit(products: unknown): string {
+  if (!products) return 'unit'
+  if (Array.isArray(products)) return (products[0] as { unit: string })?.unit || 'unit'
+  return (products as { unit: string })?.unit || 'unit'
+}
+
 // Handler untuk /expired
 export async function handleExpired(ctx: Context): Promise<void> {
   const supabase = getSupabaseClient()
-  
+
   if (!supabase) {
     await ctx.reply('❌ Database tidak dikonfigurasi.')
     return
@@ -40,15 +52,12 @@ export async function handleExpired(ctx: Context): Promise<void> {
   const sevenDaysLater = format(addDays(new Date(), 7), 'yyyy-MM-dd')
 
   const [expiredRes, soonRes] = await Promise.all([
-    // Produk yang sudah kedaluwarsa
     supabase
       .from('stock_items')
       .select('product_id, quantity_remaining, expiry_date, storage_type, products(name)')
       .eq('is_active', true)
       .lt('expiry_date', today)
       .gt('quantity_remaining', 0),
-    
-    // Produk yang akan kedaluwarsa dalam 7 hari
     supabase
       .from('stock_items')
       .select('product_id, quantity_remaining, expiry_date, storage_type, products(name)')
@@ -59,8 +68,8 @@ export async function handleExpired(ctx: Context): Promise<void> {
       .order('expiry_date'),
   ])
 
-  const expired = expiredRes.data || []
-  const expiringSoon = soonRes.data || []
+  const expired = (expiredRes.data || []) as Array<Record<string, unknown>>
+  const expiringSoon = (soonRes.data || []) as Array<Record<string, unknown>>
 
   if (expired.length === 0 && expiringSoon.length === 0) {
     await ctx.reply('✅ Tidak ada produk yang kedaluwarsa atau akan segera kedaluwarsa dalam 7 hari.')
@@ -68,20 +77,15 @@ export async function handleExpired(ctx: Context): Promise<void> {
   }
 
   let text = `⚠️ *Alert Kedaluwarsa Produk*\n`
-  text += `_${format(new Date(), 'dd MMM yyyy, HH:mm')}_\n\n`
+  text += `_${format(new Date(), 'dd MMM yyyy, HH:mm', { locale: idLocale })}_\n\n`
 
   if (expired.length > 0) {
     text += `🔴 *SUDAH KEDALUWARSA (${expired.length} item):*\n`
-    expired.forEach((item: {
-      quantity_remaining: number
-      expiry_date: string
-      storage_type: string
-      products: { name: string } | null
-    }) => {
-      const daysAgo = Math.abs(getDaysUntilExpiry(item.expiry_date))
-      const name = (item.products as { name: string } | null)?.name || 'Unknown'
+    expired.forEach(item => {
+      const daysAgo = Math.abs(getDaysUntilExpiry(item.expiry_date as string))
+      const name = getProductName(item.products)
       text += `• *${name}*\n`
-      text += `  ${item.quantity_remaining} unit | ${formatStorageType(item.storage_type)}\n`
+      text += `  ${item.quantity_remaining} unit | ${formatStorageType(item.storage_type as string)}\n`
       text += `  Expired ${daysAgo} hari yang lalu\n`
     })
     text += '\n'
@@ -89,30 +93,24 @@ export async function handleExpired(ctx: Context): Promise<void> {
 
   if (expiringSoon.length > 0) {
     text += `🟡 *Akan Kedaluwarsa (${expiringSoon.length} item):*\n`
-    expiringSoon.forEach((item: {
-      quantity_remaining: number
-      expiry_date: string
-      storage_type: string
-      products: { name: string } | null
-    }) => {
-      const days = getDaysUntilExpiry(item.expiry_date)
+    expiringSoon.forEach(item => {
+      const days = getDaysUntilExpiry(item.expiry_date as string)
       const emoji = days <= 3 ? '🟠' : '🟡'
-      const name = (item.products as { name: string } | null)?.name || 'Unknown'
+      const name = getProductName(item.products)
       text += `${emoji} *${name}*\n`
-      text += `  ${item.quantity_remaining} unit | ${formatStorageType(item.storage_type)}\n`
+      text += `  ${item.quantity_remaining} unit | ${formatStorageType(item.storage_type as string)}\n`
       text += `  Exp: ${item.expiry_date} (${days === 0 ? 'HARI INI' : `${days} hari lagi`})\n`
     })
   }
 
   text += `\n_Segera jual atau buang produk kedaluwarsa!_`
-
   await ctx.replyWithMarkdown(text)
 }
 
 // Handler untuk /restock
 export async function handleRestock(ctx: Context): Promise<void> {
   const supabase = getSupabaseClient()
-  
+
   if (!supabase) {
     await ctx.reply('❌ Database tidak dikonfigurasi.')
     return
@@ -131,31 +129,26 @@ export async function handleRestock(ctx: Context): Promise<void> {
       .gt('quantity_remaining', 0),
   ])
 
-  const materials = materialsRes.data || []
-  const stockItems = stockRes.data || []
+  const materials = (materialsRes.data || []) as Array<Record<string, unknown>>
+  const stockItems = (stockRes.data || []) as Array<Record<string, unknown>>
 
   // Group stok produk
   const productStock: Record<string, { name: string; unit: string; total: number }> = {}
-  stockItems.forEach((s: {
-    product_id: string
-    quantity_remaining: number
-    products: { name: string; unit: string } | null
-  }) => {
-    if (!productStock[s.product_id]) {
-      productStock[s.product_id] = {
-        name: (s.products as { name: string; unit: string } | null)?.name || 'Unknown',
-        unit: (s.products as { name: string; unit: string } | null)?.unit || 'unit',
+  stockItems.forEach(s => {
+    const pid = s.product_id as string
+    if (!productStock[pid]) {
+      productStock[pid] = {
+        name: getProductName(s.products),
+        unit: getProductUnit(s.products),
         total: 0,
       }
     }
-    productStock[s.product_id].total += s.quantity_remaining
+    productStock[pid].total += s.quantity_remaining as number
   })
 
   const lowProducts = Object.values(productStock).filter(p => p.total < 5)
-  const lowMaterials = materials.filter((m: { current_stock: number; min_stock_alert: number }) =>
-    m.current_stock <= m.min_stock_alert
-  )
-  const criticalMaterials = materials.filter((m: { current_stock: number }) => m.current_stock === 0)
+  const lowMaterials = materials.filter(m => (m.current_stock as number) <= (m.min_stock_alert as number))
+  const criticalMaterials = materials.filter(m => (m.current_stock as number) === 0)
 
   if (lowProducts.length === 0 && lowMaterials.length === 0) {
     await ctx.reply('✅ Semua stok aman. Tidak ada yang perlu di-restock saat ini.')
@@ -167,7 +160,7 @@ export async function handleRestock(ctx: Context): Promise<void> {
 
   if (criticalMaterials.length > 0) {
     text += `🚨 *DARURAT - Bahan Habis:*\n`
-    criticalMaterials.forEach((m: { name: string; unit: string }) => {
+    criticalMaterials.forEach(m => {
       text += `🔴 ${m.name} - *HABIS!* Segera beli!\n`
     })
     text += '\n'
@@ -182,13 +175,16 @@ export async function handleRestock(ctx: Context): Promise<void> {
     text += `\n_Pertimbangkan untuk segera produksi._\n\n`
   }
 
-  const normalLowMaterials = lowMaterials.filter((m: { current_stock: number }) => m.current_stock > 0)
+  const normalLowMaterials = lowMaterials.filter(m => (m.current_stock as number) > 0)
   if (normalLowMaterials.length > 0) {
     text += `🥕 *Bahan Baku Menipis:*\n`
-    normalLowMaterials.forEach((m: { name: string; current_stock: number; min_stock_alert: number; unit: string; cost_per_unit: number }) => {
-      const deficiency = m.min_stock_alert - m.current_stock
-      text += `🟡 ${m.name}: ${m.current_stock}/${m.min_stock_alert} ${m.unit}\n`
-      text += `   Perlu beli: ~${deficiency * 2} ${m.unit} (${formatRupiah(deficiency * 2 * m.cost_per_unit)})\n`
+    normalLowMaterials.forEach(m => {
+      const stock = m.current_stock as number
+      const minStock = m.min_stock_alert as number
+      const costPerUnit = m.cost_per_unit as number
+      const deficiency = minStock - stock
+      text += `🟡 ${m.name}: ${stock}/${minStock} ${m.unit}\n`
+      text += `   Perlu beli: ~${deficiency * 2} ${m.unit} (${formatRupiah(deficiency * 2 * costPerUnit)})\n`
     })
   }
 

@@ -2,7 +2,6 @@ import { Context } from 'telegraf'
 import { createClient } from '@supabase/supabase-js'
 import { format } from 'date-fns'
 
-// Buat Supabase client untuk bot
 function getSupabaseClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -20,10 +19,22 @@ function getDaysUntilExpiry(expiryDate: string): number {
   return Math.floor((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
 }
 
+function getProductName(products: unknown): string {
+  if (!products) return 'Unknown'
+  if (Array.isArray(products)) return (products[0] as { name: string })?.name || 'Unknown'
+  return (products as { name: string })?.name || 'Unknown'
+}
+
+function getProductUnit(products: unknown): string {
+  if (!products) return 'unit'
+  if (Array.isArray(products)) return (products[0] as { unit: string })?.unit || 'unit'
+  return (products as { unit: string })?.unit || 'unit'
+}
+
 // Handler untuk /stok
 export async function handleStok(ctx: Context): Promise<void> {
   const supabase = getSupabaseClient()
-  
+
   if (!supabase) {
     await ctx.reply('❌ Database tidak dikonfigurasi.')
     return
@@ -50,27 +61,22 @@ export async function handleStok(ctx: Context): Promise<void> {
 
   // Group by product
   const productStock: Record<string, { name: string; unit: string; total: number; nearestExpiry: string }> = {}
-  stockData.forEach((item: {
-    product_id: string
-    quantity_remaining: number
-    expiry_date: string
-    storage_type: string
-    products: { name: string; unit: string } | null
-  }) => {
-    const product = item.products as { name: string; unit: string } | null
-    if (!productStock[item.product_id]) {
-      productStock[item.product_id] = {
-        name: product?.name || 'Unknown',
-        unit: product?.unit || 'unit',
-        total: 0,
-        nearestExpiry: item.expiry_date,
-      }
+
+  for (const item of stockData as Array<Record<string, unknown>>) {
+    const pid = item.product_id as string
+    const name = getProductName(item.products)
+    const unit = getProductUnit(item.products)
+    const qty = item.quantity_remaining as number
+    const expiry = item.expiry_date as string
+
+    if (!productStock[pid]) {
+      productStock[pid] = { name, unit, total: 0, nearestExpiry: expiry }
     }
-    productStock[item.product_id].total += item.quantity_remaining
-    if (item.expiry_date < productStock[item.product_id].nearestExpiry) {
-      productStock[item.product_id].nearestExpiry = item.expiry_date
+    productStock[pid].total += qty
+    if (expiry < productStock[pid].nearestExpiry) {
+      productStock[pid].nearestExpiry = expiry
     }
-  })
+  }
 
   let text = `📦 *Stok Produk MPASI*\n`
   text += `_${format(new Date(), 'dd MMM yyyy, HH:mm')}_\n\n`
@@ -92,7 +98,7 @@ export async function handleStok(ctx: Context): Promise<void> {
 // Handler untuk /stokbahan
 export async function handleStokBahan(ctx: Context): Promise<void> {
   const supabase = getSupabaseClient()
-  
+
   if (!supabase) {
     await ctx.reply('❌ Database tidak dikonfigurasi.')
     return
@@ -121,22 +127,20 @@ export async function handleStokBahan(ctx: Context): Promise<void> {
   const warning: string[] = []
   const safe: string[] = []
 
-  data.forEach((m: { name: string; current_stock: number; min_stock_alert: number; unit: string }) => {
-    const line = `*${m.name}*: ${m.current_stock}/${m.min_stock_alert} ${m.unit}`
-    if (m.current_stock === 0) critical.push(`🔴 ${line}`)
-    else if (m.current_stock <= m.min_stock_alert) warning.push(`🟡 ${line}`)
+  for (const m of data as Array<Record<string, unknown>>) {
+    const name = m.name as string
+    const stock = m.current_stock as number
+    const minStock = m.min_stock_alert as number
+    const unit = m.unit as string
+    const line = `*${name}*: ${stock}/${minStock} ${unit}`
+    if (stock === 0) critical.push(`🔴 ${line}`)
+    else if (stock <= minStock) warning.push(`🟡 ${line}`)
     else safe.push(`🟢 ${line}`)
-  })
+  }
 
-  if (critical.length > 0) {
-    text += `*⚠️ HABIS:*\n${critical.join('\n')}\n\n`
-  }
-  if (warning.length > 0) {
-    text += `*⚠️ Menipis:*\n${warning.join('\n')}\n\n`
-  }
-  if (safe.length > 0) {
-    text += `*✅ Aman:*\n${safe.join('\n')}`
-  }
+  if (critical.length > 0) text += `*⚠️ HABIS:*\n${critical.join('\n')}\n\n`
+  if (warning.length > 0) text += `*⚠️ Menipis:*\n${warning.join('\n')}\n\n`
+  if (safe.length > 0) text += `*✅ Aman:*\n${safe.join('\n')}`
 
   await ctx.replyWithMarkdown(text)
 }

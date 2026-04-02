@@ -14,10 +14,16 @@ function formatRupiah(amount: number): string {
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount)
 }
 
-// Handler untuk /laporan - laporan penjualan hari ini
+function getProductName(products: unknown): string {
+  if (!products) return 'Unknown'
+  if (Array.isArray(products)) return (products[0] as { name: string })?.name || 'Unknown'
+  return (products as { name: string })?.name || 'Unknown'
+}
+
+// Handler untuk /laporan
 export async function handleLaporan(ctx: Context): Promise<void> {
   const supabase = getSupabaseClient()
-  
+
   if (!supabase) {
     await ctx.reply('❌ Database tidak dikonfigurasi.')
     return
@@ -29,10 +35,7 @@ export async function handleLaporan(ctx: Context): Promise<void> {
 
   const { data: orders, error } = await supabase
     .from('orders')
-    .select(`
-      total_amount, subtotal, discount_amount, payment_method,
-      order_items(quantity, subtotal, products(name))
-    `)
+    .select('total_amount, subtotal, discount_amount, payment_method, order_items(quantity, subtotal, products(name))')
     .gte('order_date', todayStart)
     .lte('order_date', todayEnd)
     .not('status', 'in', '(cancelled,voided)')
@@ -45,31 +48,32 @@ export async function handleLaporan(ctx: Context): Promise<void> {
   const dateLabel = format(today, 'EEEE, dd MMMM yyyy', { locale: idLocale })
 
   if (!orders || orders.length === 0) {
-    await ctx.replyWithMarkdown(
-      `📊 *Laporan ${dateLabel}*\n\nBelum ada penjualan hari ini.`
-    )
+    await ctx.replyWithMarkdown(`📊 *Laporan ${dateLabel}*\n\nBelum ada penjualan hari ini.`)
     return
   }
 
-  const totalRevenue = orders.reduce((sum: number, o: { total_amount: number }) => sum + o.total_amount, 0)
-  const totalDiscount = orders.reduce((sum: number, o: { discount_amount: number }) => sum + (o.discount_amount || 0), 0)
-  
+  const ordersTyped = orders as Array<Record<string, unknown>>
+
+  const totalRevenue = ordersTyped.reduce((sum, o) => sum + (o.total_amount as number), 0)
+  const totalDiscount = ordersTyped.reduce((sum, o) => sum + ((o.discount_amount as number) || 0), 0)
+
   // Hitung per produk
   const productSales: Record<string, { name: string; qty: number; revenue: number }> = {}
-  orders.forEach((order: { order_items: { products: { name: string } | null; quantity: number; subtotal: number }[] }) => {
-    order.order_items?.forEach((item) => {
-      const name = (item.products as { name: string } | null)?.name || 'Unknown'
+  ordersTyped.forEach(order => {
+    const items = (order.order_items as Array<Record<string, unknown>>) || []
+    items.forEach(item => {
+      const name = getProductName(item.products)
       if (!productSales[name]) productSales[name] = { name, qty: 0, revenue: 0 }
-      productSales[name].qty += item.quantity
-      productSales[name].revenue += item.subtotal
+      productSales[name].qty += item.quantity as number
+      productSales[name].revenue += item.subtotal as number
     })
   })
 
   // Hitung per metode pembayaran
   const paymentBreakdown: Record<string, number> = {}
-  orders.forEach((o: { payment_method: string; total_amount: number }) => {
-    const method = o.payment_method || 'lainnya'
-    paymentBreakdown[method] = (paymentBreakdown[method] || 0) + o.total_amount
+  ordersTyped.forEach(o => {
+    const method = (o.payment_method as string) || 'lainnya'
+    paymentBreakdown[method] = (paymentBreakdown[method] || 0) + (o.total_amount as number)
   })
 
   let text = `📊 *Laporan Penjualan*\n`
